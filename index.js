@@ -16,8 +16,12 @@ const IGNORE_PREFIX = '!'
 // Channels to listen to
 const CHANNELS = ['general', 'bots']
 // System prompt (sets the tone for the conversation)
-const SYSTEM_PROMPT = 'You are a skillful assistant that \
-goes straight to the point and with an occasional touch of sarcasm.';
+const SYSTEM_PROMPT_CHARACTER =
+'You are a skillful highly logical assistant that \
+goes straight to the point, with a tiny bit of occasional sarcasm.';
+const SYSTEM_PROMPT_FIXED_FORMAT =
+'Input is prefixed with [UTC:<timestamp>] as a reference to the time of the message. \
+Output should not have a timestamp prefix, unless explicitly asked.';
 
 // Initialize the OpenAI API, using the API key from the .env file
 const openai = new OpenAI({
@@ -103,7 +107,7 @@ client.on('messageCreate', async (message) => {
 
     // Ignore messages that are not in the list of channels
     if (!CHANNELS.includes(message.channel.name)) return;
-    
+
     // Ignore messages that don't start with the ignore prefix
     // unless they mention this bot
     if (message.content.startsWith(IGNORE_PREFIX) &&
@@ -123,25 +127,31 @@ client.on('messageCreate', async (message) => {
     // Add the initial message
     conversation.push({
         role: 'system',
-        content: SYSTEM_PROMPT,
+        content: SYSTEM_PROMPT_CHARACTER + '\n' + SYSTEM_PROMPT_FIXED_FORMAT,
     });
+
+    // Variable to hold the ID of the last user who sent a message
+    let lastUserId = null;
 
     // Fetch the last 10 messages
     let prevMessages = await message.channel.messages.fetch({ limit: 10 });
     // Reverse the messages so they are in chronological order
     prevMessages.reverse();
     prevMessages.forEach((msg) => {
+        // Update the last user ID
+        lastUserId = msg.author.id;
+
         // Ignore messages from bots, except this one
         if (msg.author.bot && msg.author.id !== client.user.id) return;
 
         if (!isMessageForBot(client, msg)) return;
-        
+
         let contentNoMentionPrefix = msg.content;
         // Remove the mention prefix if it exists
         if (contentNoMentionPrefix.startsWith(`<@!${client.user.id}>`)) {
             contentNoMentionPrefix = contentNoMentionPrefix.substring(`<@!${client.user.id}>`.length);
         }
-    
+
         // Ignore messages that start with the ignore prefix
         if (contentNoMentionPrefix.startsWith(IGNORE_PREFIX)) return;
 
@@ -150,11 +160,18 @@ client.on('messageCreate', async (message) => {
 
         // Determine the role for this message
         const role = (msg.author.id === client.user.id) ? 'assistant' : 'user';
+
+        // Get the current UTC time in ISO 8601 format
+        const timestamp = msg.createdAt.toISOString();
+
+        // Integrate the timestamp into the message content
+        const contentWithTimestamp = `[UTC:${timestamp}] ${contentNoMentionPrefix}`;
+
         // Add the message to the conversation array
         conversation.push({
             role: role,
             name: cleanUsername,
-            content: contentNoMentionPrefix,
+            content: contentWithTimestamp,
         });
     });
 
@@ -181,12 +198,18 @@ client.on('messageCreate', async (message) => {
     // Finally, send the response, splitting it into chunks if necessary
     const responseMessage = response.choices[0].message.content;
     const chunkSize = 2000; // Discord message character limit
+
+    // Check if the bot's message immediately follows a message from the same user
+    const shouldMentionUser = lastUserId !== message.author.id;
+
     for (let i = 0; i < responseMessage.length; i += chunkSize) {
         const chunk = responseMessage.substring(i, i + chunkSize);
-        await message.reply(chunk);
+        const replyText = shouldMentionUser ? `<@${message.author.id}> ${chunk}` : chunk;
+        await message.channel.send(replyText);
     }
 });
 
 //==================================================================
 // Login to Discord with the bot token
 client.login(process.env.DISCORD_TOKEN);
+
