@@ -14,14 +14,22 @@ const client = new Client({
 // Prefix to ignore messages
 const IGNORE_PREFIX = '!'
 // Channels to listen to
-const CHANNELS = ['general', 'bots']
+const CHANNELS = ['general', 'test0', 'test1', 'test2', 'test3']
 // System prompt (sets the tone for the conversation)
 const SYSTEM_PROMPT_CHARACTER =
 'You are a skillful highly logical assistant that \
 goes straight to the point, with a tiny bit of occasional sarcasm.';
 const SYSTEM_PROMPT_FIXED_FORMAT =
-'Input is prefixed with [UTC:<timestamp>] as a reference to the time of the message. \
-Output should not have a timestamp prefix, unless explicitly asked.';
+'You are operating in a forum, where multiple users can interact with you. \
+Most messages will include a header at the start with the format \
+$$HEADER$$ CURTIME:<timestamp>, FROM:<username>, TO:<username>, $$END_HEADER$$ \
+Additional fields may be present in the header for added context. \
+Never generate the header yourself. \
+Given the context, you should determine if you need to reply to a message. \
+You should also determine if a message should have a direct mention to a user, \
+to resolve any ambiguity, like when other users are involved in the discussion. \
+If you don\'t wish to reply to a message, just produce empty content. \
+';
 
 // Initialize the OpenAI API, using the API key from the .env file
 const openai = new OpenAI({
@@ -70,31 +78,9 @@ client.on('guildMemberRemove', member => {
 });
 
 //==================================================================
-function isMessageForBot(client, message) {
-    // Direct mention
-    if (message.mentions.has(client.user.id))
-        return true;
-
-    // Get the member count for the guild from our Map
-    let memberCount = 0;
-    if (message.channel.type === ChannelType.GuildText) {
-        //console.log("Debug: message.guild.id: ", message.guild.id);  // Debug line
-        memberCount = guildMemberCounts.get(message.guild.id) || 0;
-    }
-    else
-    if (message.channel.type === ChannelType.DM) {
-        memberCount = 2;
-    }
-
-    // Do nothing if there are more than 2 members in the channel
-    if (memberCount > 2)
-        return false;
-
-    // Ignore if the user is mentioning themselves
-    if (message.mentions.has(message.author.id))
-        return false;
-
-    return true;
+function doCleanUsername(username) {
+    // Clean up the username, because OpenAI doesn't like special characters
+    return username.replace(/\s+/g, '_').replace(/[^\w\s]/gi, '');
 }
 
 //==================================================================
@@ -108,13 +94,10 @@ client.on('messageCreate', async (message) => {
     // Ignore messages that are not in the list of channels
     if (!CHANNELS.includes(message.channel.name)) return;
 
-    // Ignore messages that don't start with the ignore prefix
+    // Ignore messages that start with the ignore prefix
     // unless they mention this bot
     if (message.content.startsWith(IGNORE_PREFIX) &&
         !message.mentions.has(client.user.id)) return;
-
-    // Ignore messages that are not for the bot
-    if (!isMessageForBot(client, message)) return;
 
     // Simulate typing
     await message.channel.sendTyping();
@@ -144,38 +127,42 @@ client.on('messageCreate', async (message) => {
         // Ignore messages from bots, except this one
         if (msg.author.bot && msg.author.id !== client.user.id) return;
 
-        if (!isMessageForBot(client, msg)) return;
+        // Get the current UTC time in ISO 8601 format
+        let timestampField = msg.createdAt.toISOString();
+        let fromField = doCleanUsername(msg.author.username);
 
+        // Determine the "to" field if it's obvious
+        let toField = '';
         let contentNoMentionPrefix = msg.content;
         // Remove the mention prefix if it exists
         if (contentNoMentionPrefix.startsWith(`<@!${client.user.id}>`)) {
             contentNoMentionPrefix = contentNoMentionPrefix.substring(`<@!${client.user.id}>`.length);
+            toField = doCleanUsername(client.user.username);
         }
 
         // Ignore messages that start with the ignore prefix
         if (contentNoMentionPrefix.startsWith(IGNORE_PREFIX)) return;
 
-        // Clean up the username, because OpenAI doesn't like special characters
-        const cleanUsername = msg.author.username.replace(/\s+/g, '_').replace(/[^\w\s]/gi, '');
-
-        // Determine the role for this message
-        const role = (msg.author.id === client.user.id) ? 'assistant' : 'user';
-
-        // Get the current UTC time in ISO 8601 format
-        const timestamp = msg.createdAt.toISOString();
-
         // Integrate the timestamp into the message content
-        const contentWithTimestamp = `[UTC:${timestamp}] ${contentNoMentionPrefix}`;
+        let finalContent = '$$HEADER$$';
+        finalContent += ` CURTIME:${timestampField},`;
+        finalContent += ` FROM:${fromField},`;
+        if (toField !== '') {
+            finalContent += ` TO:${toField},`;
+        }
+        finalContent += ' $$END_HEADER$$';
+
+        finalContent += ' ' + contentNoMentionPrefix;
 
         // Add the message to the conversation array
         conversation.push({
-            role: role,
-            name: cleanUsername,
-            content: contentWithTimestamp,
+            role: (msg.author.id === client.user.id) ? 'assistant' : 'user',
+            //name: cleanUsername,
+            content: finalContent,
         });
     });
 
-    //console.log('Conversation:', conversation);
+    console.log('Conversation:', conversation);
 
     // Respond to the message
     const response = await openai.chat.completions.create({
@@ -195,15 +182,22 @@ client.on('messageCreate', async (message) => {
         return;
     }
 
-    // Finally, send the response, splitting it into chunks if necessary
-    const responseMessage = response.choices[0].message.content;
+    console.log('Response:', response);
+    console.log('Response content:', response.choices[0].message.content);
+
+    // Remove the $$HEADER$$ and $$END_HEADER$$ tags and anything in between
+    // because the model may have generated them
+    let cleanResponseMsg =
+        response.choices[0].message.content.replace(/\$\$HEADER\$\$.*\$\$END_HEADER\$\$/g, '');
+
+
     const chunkSize = 2000; // Discord message character limit
 
-    // Check if the bot's message immediately follows a message from the same user
-    const shouldMentionUser = lastUserId !== message.author.id;
+    // Maybe some day, if we implement long delays for replies
+    const shouldMentionUser = false;
 
-    for (let i = 0; i < responseMessage.length; i += chunkSize) {
-        const chunk = responseMessage.substring(i, i + chunkSize);
+    for (let i = 0; i < cleanResponseMsg.length; i += chunkSize) {
+        const chunk = cleanResponseMsg.substring(i, i + chunkSize);
         const replyText = shouldMentionUser ? `<@${message.author.id}> ${chunk}` : chunk;
         await message.channel.send(replyText);
     }
