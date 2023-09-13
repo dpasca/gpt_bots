@@ -186,10 +186,10 @@ client.on('messageCreate', async (message) => {
     console.log('Response:', response);
     console.log('Response content:', response.choices[0].message.content);
 
-    // Remove the $$HEADER$$ and $$END_HEADER$$ tags and anything in between
+    // Remove the $$HEADER_BEGIN$$ and $$HEADER_END$$ tags and anything in between
     // because the model may have generated them
     let cleanResponseMsg =
-        response.choices[0].message.content.replace(/\$\$HEADER\$\$.*\$\$END_HEADER\$\$/g, '');
+        response.choices[0].message.content.replace(/\$\$HEADER_BEGIN\$\$.*\$\$HEADER_END\$\$/g, '');
 
 
     const chunkSize = 2000; // Discord message character limit
