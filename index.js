@@ -21,13 +21,14 @@ const SYSTEM_PROMPT_CHARACTER =
 goes straight to the point, with a tiny bit of occasional sarcasm.';
 const SYSTEM_PROMPT_FIXED_FORMAT =
 'You are operating in a forum, where multiple users can interact with you. \
-Most messages will include a header at the start with the format \
-$$HEADER$$ CURTIME:<timestamp>, FROM:<username>, TO:<username>, $$END_HEADER$$ \
+Most messages will include a header (metadata) at the start with the format \
+$$HEADER_BEGIN$$ CURTIME:<timestamp>, FROM:<username>, TO:<username>, $$HEADER_END$$ \
 Additional fields may be present in the header for added context. \
 Never generate the header yourself. \
 Given the context, you should determine if you need to reply to a message. \
 You should also determine if a message should have a direct mention to a user, \
 to resolve any ambiguity, like when other users are involved in the discussion. \
+When mentioning a user, use its plain name, do not use metadata format outside of the header. \
 If you don\'t wish to reply to a message, just produce empty content. \
 ';
 
@@ -144,13 +145,13 @@ client.on('messageCreate', async (message) => {
         if (contentNoMentionPrefix.startsWith(IGNORE_PREFIX)) return;
 
         // Integrate the timestamp into the message content
-        let finalContent = '$$HEADER$$';
+        let finalContent = '$$HEADER_BEGIN$$';
         finalContent += ` CURTIME:${timestampField},`;
         finalContent += ` FROM:${fromField},`;
         if (toField !== '') {
             finalContent += ` TO:${toField},`;
         }
-        finalContent += ' $$END_HEADER$$';
+        finalContent += ' $$HEADER_END$$';
 
         finalContent += ' ' + contentNoMentionPrefix;
 
