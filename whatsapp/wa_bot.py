@@ -3,7 +3,7 @@
 #==================================================================
 
 # Running the bot:
-# 1. Run "ngrok http 5000" to expose the local server to the Internet
+# 1. Run "ngrok http 127.0.0.1:5000" to expose the local server to the Internet
 # 2. Copy the ngrok URL and:
 #     - Go to console.twilio.com : Messaging -> Try it out -> Send a WhatsApp message
 #     - Set <ngrok URL>/whatsapp to "When a message comes in"
